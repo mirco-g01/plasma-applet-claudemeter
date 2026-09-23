@@ -104,6 +104,12 @@ Item {
         }
     }
 
+    ResetCard {
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        Layout.rightMargin: Kirigami.Units.smallSpacing
+    }
+
     // Extra usage
     ColumnLayout {
         Layout.fillWidth: true
@@ -122,7 +128,9 @@ Item {
                 Layout.fillWidth: true
             }
             QQC2.Label {
-                text: root.extraUsageEnabled ? "Enabled" : "Disabled"
+                text: root.extraUsageEnabled ? "Enabled"
+                    : root.extraUsageDisabledReason === "out_of_credits" ? "Out of credits"
+                    : "Disabled"
                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                 color: root.extraUsageEnabled ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
             }

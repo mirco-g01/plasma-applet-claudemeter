@@ -149,7 +149,9 @@ ColumnLayout {
         }
 
         QQC2.Label {
-            text: usageBar.resetTime ? "Resets in " + usageBar.resetTime : ""
+            // "expired" means the window ended and the next message opens a new one.
+            text: usageBar.resetTime === "expired" ? "Window ended"
+                : usageBar.resetTime ? "Resets in " + usageBar.resetTime : ""
             visible: text !== ""
             font: Kirigami.Theme.smallFont
             color: Kirigami.Theme.disabledTextColor

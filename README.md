@@ -11,6 +11,7 @@ A KDE Plasma 6 panel applet that monitors your Claude Code rate limits.
 - Displays the 5-hour and 7-day (all models) rate limit windows
 - Adds a separate bar for every scoped weekly limit the API reports (e.g. Fable), discovered dynamically so new models and plan tiers work without an update
 - Popup bars show your pace: each bar is split into its hours or days, a marker tracks the current time, and usage that has run past that marker is drawn in the warning color
+- Shows the usage-limit reset claude.ai offers under Settings > Usage (what it refills, how many are left, the deadline) and lets you spend it from the popup, always behind a confirmation step. The widget never uses a reset on its own
 - Two compact panel styles: stacked bars or circular gauge
 - Configurable warning/critical thresholds with color coding
 - Customizable bar colors
@@ -20,9 +21,10 @@ A KDE Plasma 6 panel applet that monitors your Claude Code rate limits.
 ## How It Works
 
 1. Reads the OAuth token from `.credentials.json`, created by the Claude Code CLI when you sign in. It checks `$CLAUDE_CONFIG_DIR` first when that variable is exported, then `~/.claude`, then a single `~/.claude*` sibling folder if exactly one has credentials. Setting **Claude folder** in the widget overrides all of it
-2. Calls `GET https://api.anthropic.com/api/oauth/usage` with a bearer token
+2. Calls `GET https://api.anthropic.com/api/oauth/usage?cedar_ember=1` with a bearer token. It identifies itself as the Claude Code CLI, because the server only lists reset grants for Claude Code and claude.ai
 3. Parses the response for the 5-hour and 7-day windows, plus every scoped weekly limit in the `limits` array that has a reset time or non-zero utilization (the older top-level `seven_day_*` fields are still read as a fallback)
 4. The token is passed to `curl` via stdin (not as a command-line argument, which would be visible in `/proc`)
+5. Using a reset sends `POST /api/organizations/<org>/reset_rate_limits`, the same request Claude Code's `/limit-reset` makes. The organization id comes from Claude Code's `.claude.json`
 
 > **Note:** This widget uses an internal Anthropic API endpoint that is not part of the public API documentation. It may change or stop working without notice.
 

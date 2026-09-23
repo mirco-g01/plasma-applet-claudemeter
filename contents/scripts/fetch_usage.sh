@@ -3,20 +3,45 @@
 # Outputs JSON to stdout. Always exits 0; errors reported as JSON.
 #
 # Usage: fetch_usage.sh [--activity] [claude-folder]
+#        fetch_usage.sh --claim <grant-id> <request-id> [claude-folder]
 #   --activity  print the mtime of history.jsonl in the resolved folder (or 0)
 #               instead of fetching, so activity polling follows the same
 #               folder resolution the fetch does.
+#   --claim     spend one usage-limit reset from the given grant. Prints
+#               {"claim": {"result": ...}}. Only ever run on an explicit click;
+#               CLAUDEMETER_DRY_RUN=1 prints the request instead of sending it.
 
 set -euo pipefail
 
 MODE="fetch"
+GRANT_ID=""
+REQUEST_ID=""
 if [ "${1:-}" = "--activity" ]; then
     MODE="activity"
     shift
+elif [ "${1:-}" = "--claim" ]; then
+    MODE="claim"
+    GRANT_ID="${2:-}"
+    REQUEST_ID="${3:-}"
+    shift 3 || shift $#
 fi
 
 EXPLICIT="${1:-}"
 CACHE_FILE="$HOME/.cache/claudemeter/last_usage.json"
+API="https://api.anthropic.com"
+
+# Reset grants (the usage response's `cedar_ember` block) are only offered to
+# Claude Code and claude.ai: any other User-Agent gets `ineligible_reason:
+# "surface"` and an empty grant list. So identify as the installed Claude Code,
+# or a recent release when the native installer's versions folder is absent.
+CLAUDE_VERSION="2.1.280"
+if [ -d "$HOME/.local/share/claude/versions" ]; then
+    NEWEST="$(ls "$HOME/.local/share/claude/versions" 2>/dev/null | grep -E '^[0-9]+(\.[0-9]+)+$' | sort -V | tail -n 1 || true)"
+    if [ -n "$NEWEST" ]; then
+        CLAUDE_VERSION="$NEWEST"
+    fi
+fi
+USER_AGENT="claude-cli/$CLAUDE_VERSION (external, cli)"
 
 error_json() {
     python3 -c "import json,sys; print(json.dumps({'error':sys.argv[1],'message':sys.argv[2]}))" "$1" "$2"
@@ -142,15 +167,97 @@ if [ "$EXPIRED" = "1" ]; then
     error_json "token_expired" "OAuth token has expired. Run claude to refresh."
 fi
 
-# Call usage API - auth header passed via stdin (-K -) to avoid token in /proc/cmdline
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
 
+if [ "$MODE" = "claim" ]; then
+    # Same shapes the server enforces, checked here too because both ids end up
+    # in a URL-adjacent JSON body and the widget builds this command line.
+    if ! [[ "$GRANT_ID" =~ ^[a-z0-9_-]{1,40}$ ]] || ! [[ "$REQUEST_ID" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
+        error_json "claim_error" "Refusing to send a reset with a malformed grant or request id. Nothing was used."
+    fi
+
+    # The reset endpoint is per organization. Claude Code keeps the id in its
+    # global config: .claude.json next to the default folder, or inside a
+    # CLAUDE_CONFIG_DIR one (with the legacy .config.json taking precedence).
+    CONFIG_FILES=("$CLAUDE_DIR/.config.json")
+    if [ "$CLAUDE_DIR" = "$HOME/.claude" ]; then
+        CONFIG_FILES+=("$HOME/.claude.json")
+    else
+        CONFIG_FILES+=("$CLAUDE_DIR/.claude.json")
+    fi
+    ORG_UUID="$(python3 -c "
+import json, sys
+for path in sys.argv[1:]:
+    try:
+        with open(path) as f:
+            org = (json.load(f).get('oauthAccount') or {}).get('organizationUuid')
+    except Exception:
+        continue
+    if org:
+        print(org)
+        break
+" "${CONFIG_FILES[@]}" 2>/dev/null || true)"
+    if ! [[ "$ORG_UUID" =~ ^[0-9a-fA-F-]{36}$ ]]; then
+        error_json "claim_error" "Could not find your organization in $(tildify "${CONFIG_FILES[-1]}"). Run claude once, then try again. Nothing was used."
+    fi
+
+    BODY="$(python3 -c "import json,sys; print(json.dumps({'program':'cedar_ember','grant_id':sys.argv[1],'request_id':sys.argv[2]}))" "$GRANT_ID" "$REQUEST_ID")"
+    URL="$API/api/organizations/$ORG_UUID/reset_rate_limits"
+
+    if [ "${CLAUDEMETER_DRY_RUN:-0}" = "1" ]; then
+        TOKEN=""
+        python3 -c "import json,sys; print(json.dumps({'claim':{'result':'dry_run'},'url':sys.argv[1],'body':json.loads(sys.argv[2]),'user_agent':sys.argv[3]}))" "$URL" "$BODY" "$USER_AGENT"
+        exit 0
+    fi
+
+    # 25s matches Claude Code. A timeout here does not mean nothing happened:
+    # the server may have applied the reset, so it is reported as unconfirmed.
+    HTTP_CODE=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | \
+        curl -s --max-time 25 -o "$TMPFILE" -w '%{http_code}' \
+        -K - \
+        -X POST \
+        -H "anthropic-beta: oauth-2025-04-20" \
+        -H "Content-Type: application/json" \
+        -A "$USER_AGENT" \
+        --data-binary "$BODY" \
+        "$URL" 2>/dev/null) || HTTP_CODE="000"
+    TOKEN=""
+
+    python3 -c "
+import json, sys
+code = sys.argv[1]
+out = {'result': 'error', 'http': code}
+if code == '429':
+    out = {'result': 'rate_limited'}
+elif code in ('401', '403'):
+    out = {'result': 'auth_error'}
+elif code == '200':
+    try:
+        with open(sys.argv[2]) as f:
+            data = json.load(f)
+        out = {
+            'result': data.get('result') or 'unavailable',
+            'reason': data.get('reason'),
+            'resets_left': data.get('resets_left'),
+            'cleared': data.get('cleared') or [],
+            'cooldown_until': data.get('cooldown_until'),
+        }
+    except Exception:
+        pass
+json.dump({'claim': out}, sys.stdout)
+" "$HTTP_CODE" "$TMPFILE"
+    exit 0
+fi
+
+# Call usage API - auth header passed via stdin (-K -) to avoid token in /proc/cmdline.
+# `cedar_ember=1` adds the reset grants to the response.
 HTTP_CODE=$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | \
     curl -s --max-time 10 -o "$TMPFILE" -w '%{http_code}' \
     -K - \
     -H "anthropic-beta: oauth-2025-04-20" \
-    https://api.anthropic.com/api/oauth/usage 2>/dev/null) || error_json "network_error" "Failed to reach Anthropic API"
+    -A "$USER_AGENT" \
+    "$API/api/oauth/usage?cedar_ember=1" 2>/dev/null) || error_json "network_error" "Failed to reach Anthropic API"
 
 TOKEN=""
 

@@ -29,6 +29,21 @@ PlasmoidItem {
     property real extraUsageUtil: 0
     property string extraUsageLimit: ""
     property string extraUsageUsed: ""
+    property string extraUsageDisabledReason: ""
+
+    // --- Limit reset (the API's `cedar_ember` block) ---
+    // The grant the server wants spent next, or null. Each: { id, label,
+    // resetsLeft, resetsTotal, endsAt, clears, usableNow, requiresLimit,
+    // paused, percentUsed }.
+    property var resetGrant: null
+    property bool resetAtLimit: false
+    property bool claimInFlight: false
+    // Kept across a failed or unconfirmed claim so a retry reuses it: the server
+    // dedupes on it, so a retry can never spend a second reset.
+    property string claimRequestId: ""
+    property string claimRequestGrant: ""
+    property string claimMessage: ""
+    property bool claimSucceeded: false
 
     // --- Cache state ---
     property bool dataCached: false
@@ -126,9 +141,14 @@ PlasmoidItem {
     // activity check runs through it too — otherwise an auto-detected folder
     // would fetch fine but never notice a new session.
     function usageCommand(activity) {
+        return root.scriptCommand(activity ? ["--activity"] : [])
+    }
+
+    // `args` must be shell-safe as is: the claim ids are regex-checked first.
+    function scriptCommand(args) {
         var scriptPath = decodeURIComponent(Qt.resolvedUrl("../scripts/fetch_usage.sh").toString().replace(/^file:\/\//, ""))
         var cmd = "bash \"" + scriptPath + "\""
-        if (activity) cmd += " --activity"
+        for (var i = 0; i < args.length; i++) cmd += " \"" + args[i] + "\""
         var folder = root.claudeFolder.trim()
         if (folder) cmd += " \"" + folder + "\""
         return cmd
@@ -251,10 +271,15 @@ PlasmoidItem {
                 root.extraUsageUtil = data.extra_usage.utilization || 0
                 root.extraUsageLimit = data.extra_usage.monthly_limit != null ? plasmoid.configuration.currencySymbol + (data.extra_usage.monthly_limit / 100).toFixed(2) : ""
                 root.extraUsageUsed = plasmoid.configuration.currencySymbol + ((data.extra_usage.used_credits || 0) / 100).toFixed(2)
+                root.extraUsageDisabledReason = data.extra_usage.disabled_reason || ""
             } else {
                 root.hasExtraUsage = false
                 root.extraUsageEnabled = false
+                root.extraUsageDisabledReason = ""
             }
+
+            root.resetGrant = root.parseResetGrant(data.cedar_ember)
+            root.resetAtLimit = !!(data.cedar_ember && data.cedar_ember.at_limit)
 
             root.dataCached = !!data.cached
             if (data.rate_limited) {
@@ -309,6 +334,139 @@ PlasmoidItem {
             }
         }
         return "Scoped"
+    }
+
+    // The grant to offer from a `cedar_ember` block, or null. Only the one the
+    // server names as next is offered: it rejects a claim on any other.
+    function parseResetGrant(block) {
+        if (!block || !block.eligible || !Array.isArray(block.grants)) return null
+        for (var i = 0; i < block.grants.length; i++) {
+            var g = block.grants[i]
+            if (!g || g.id !== block.next_grant_id) continue
+            if (!/^[a-z0-9_-]{1,40}$/.test(g.id) || !(g.resets_left > 0)) return null
+            return {
+                id: g.id,
+                label: g.label || "",
+                resetsLeft: g.resets_left,
+                resetsTotal: g.resets_total || g.resets_left,
+                endsAt: g.ends_at || "",
+                clears: Array.isArray(g.clears) ? g.clears : [],
+                usableNow: !!g.usable_now,
+                requiresLimit: g.use_requires_limit !== false,
+                paused: !!g.paused,
+                percentUsed: g.percent_used || {}
+            }
+        }
+        return null
+    }
+
+    // What a limit key in a grant's `clears` list is called in the popup.
+    function limitNameFor(key) {
+        if (key === "five_hour") return "5-hour"
+        if (key === "seven_day") return "weekly"
+        // The scoped weeklies: its percent_used tracks the Fable bar exactly.
+        if (key === "seven_day_overage_included") {
+            var names = []
+            for (var i = 0; i < root.weeklyModels.length; i++) names.push(root.weeklyModels[i].name)
+            return names.length ? names.join(", ") + " weekly" : "model weekly"
+        }
+        return root.weeklyNameFor(key) + " weekly"
+    }
+
+    function resetClearsText(grant) {
+        if (!grant) return ""
+        var names = []
+        for (var i = 0; i < grant.clears.length; i++) names.push(root.limitNameFor(grant.clears[i]))
+        if (names.length === 0) return "your limits"
+        if (names.length === 1) return names[0]
+        return names.slice(0, -1).join(", ") + " and " + names[names.length - 1]
+    }
+
+    // "You still have 67% of your Fable weekly limit left.", about the fullest
+    // limit the reset would clear, or "" when that is unknown.
+    function resetEarlyText(grant) {
+        if (!grant) return ""
+        var topKey = "", topPct = -1
+        for (var i = 0; i < grant.clears.length; i++) {
+            var pct = grant.percentUsed[grant.clears[i]]
+            if (typeof pct === "number" && pct > topPct) {
+                topPct = pct
+                topKey = grant.clears[i]
+            }
+        }
+        if (topPct < 0 || topPct >= 100) return ""
+        return "You still have " + (100 - topPct) + "% of your " + root.limitNameFor(topKey) + " limit left."
+    }
+
+    function newRequestId() {
+        var hex = ""
+        for (var i = 0; i < 32; i++) hex += Math.floor(Math.random() * 16).toString(16)
+        return hex
+    }
+
+    // Spends one reset. Only ever called from the popup's confirm button.
+    function claimReset() {
+        var grant = root.resetGrant
+        if (!grant || root.claimInFlight) return
+        if (root.claimRequestGrant !== grant.id || !root.claimRequestId) {
+            root.claimRequestId = root.newRequestId()
+            root.claimRequestGrant = grant.id
+        }
+        root.claimInFlight = true
+        root.claimMessage = ""
+        root.claimSucceeded = false
+        claimRunner.command = root.scriptCommand(["--claim", grant.id, root.claimRequestId])
+        claimTimeoutTimer.restart()
+        claimRunner.connectSource(claimRunner.command)
+    }
+
+    function handleClaimResult(stdout) {
+        claimTimeoutTimer.stop()
+        root.claimInFlight = false
+        var data
+        try {
+            data = JSON.parse(stdout)
+        } catch (e) {
+            data = { claim: { result: "error" } }
+        }
+        if (data.error) {
+            // Stopped before anything was sent (no token, no organization).
+            root.claimRequestId = ""
+            root.claimMessage = data.message || data.error
+            return
+        }
+        var claim = data.claim || { result: "error" }
+        root.claimSucceeded = claim.result === "reset"
+        root.claimMessage = root.claimMessageFor(claim)
+        // An unconfirmed claim keeps its id, so trying again cannot double-spend.
+        if (claim.result !== "error") root.claimRequestId = ""
+        claimRefreshTimer.restart()
+    }
+
+    function claimMessageFor(claim) {
+        switch (claim.result) {
+        case "reset":
+            var left = typeof claim.resets_left === "number" ? " · " + claim.resets_left + " left" : ""
+            return "Limits reset" + left
+        case "already_used":
+            return "That reset was already used · nothing changed just now"
+        case "not_limited":
+            return "This reset only works at a usage limit, and you're not at one now · nothing was used"
+        case "cooldown":
+            return "Another reset was just started on your account · try again in a minute"
+        case "ineligible":
+            return "This reset isn't available any more · nothing was used"
+        case "unavailable":
+            return "Couldn't reset your limits · nothing was used · try again in a moment"
+        case "rate_limited":
+            return "Too many requests · nothing was used · try again in a moment"
+        case "auth_error":
+            return "Couldn't reset your limits with this login · run claude and /login, then try again"
+        case "dry_run":
+            return "Dry run · nothing was sent"
+        default:
+            return "Couldn't confirm the reset went through · if the bars don't drop after the refresh, try again"
+        }
     }
 
     // First entry in the API's `limits` array of the given kind, or null.
@@ -406,6 +564,45 @@ PlasmoidItem {
             root.hasError = true
             root.errorMessage = "Request timed out"
         }
+    }
+
+    // --- Limit reset claim ---
+    Plasma5Support.DataSource {
+        id: claimRunner
+        property string command: ""
+        engine: "executable"
+        connectedSources: []
+        onNewData: (sourceName, data) => {
+            disconnectSource(sourceName)
+            root.handleClaimResult(data["stdout"])
+        }
+    }
+
+    // curl gives up after 25s; this only fires if the script itself hangs.
+    Timer {
+        id: claimTimeoutTimer
+        interval: 40000
+        running: false
+        repeat: false
+        onTriggered: {
+            claimRunner.disconnectSource(claimRunner.command)
+            root.handleClaimResult("")
+        }
+    }
+
+    // Re-read usage once the server has applied the reset, so the bars and the
+    // remaining count come from it rather than from the claim response.
+    Timer {
+        id: claimRefreshTimer
+        interval: 2000
+        running: false
+        repeat: false
+        onTriggered: root.requestFetch("manual")
+    }
+
+    // A stale confirmation or result would be confusing the next time the popup opens.
+    onExpandedChanged: {
+        if (!root.expanded && !root.claimInFlight) root.claimMessage = ""
     }
 
     // --- Delay before fetching after activity ---
