@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 - 2026-09-23
+
+- Show the usage-limit reset that claude.ai offers under Settings > Usage, with what it refills, how many are left and its deadline, and spend it from the popup behind a confirmation step
+- Identify as the Claude Code CLI to the usage endpoint, which only lists reset grants for Claude Code and claude.ai
+- Say "Out of credits" instead of "Disabled" when extra usage has run out of credits
+- Say "Window ended" instead of "Resets in expired" once the 5-hour window has lapsed
+
 ## 0.6.2 - 2026-08-27
 
 - Find the sign-in token when `~/.claude/.credentials.json` is missing, and say which folders were searched when it turns up nowhere (#1)
