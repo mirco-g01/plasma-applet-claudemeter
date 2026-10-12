@@ -69,6 +69,7 @@ Right-click the widget and select "Configure...". Options include:
 - **Warning / Critical thresholds** - percentage thresholds for color changes
 - **Colors** - customize the normal and warning bar colors
 - **Claude folder** - path to an alternate Claude config folder (default: `~/.claude`). Useful if you run multiple accounts via `CLAUDE_CONFIG_DIR`, e.g. `~/.claude-personal`. Add one widget instance per account to monitor them side by side
+- **Account label** - a short text such as MAX or PRO, shown in the panel next to the bars or gauge (not in vertical panels), in the tooltip and in the popup title, so instances for different accounts can be told apart (default: empty)
 
 ## Troubleshooting
 
@@ -79,7 +80,6 @@ Right-click the widget and select "Configure...". Options include:
   - You signed out and have not signed back in.
 - **"Several accounts found ..."** - two or more `~/.claude*` folders each hold credentials, and the widget will not guess between them. Set **Claude folder** to the one you want. Add a second widget instance pointed at the other folder to watch both.
 - **"Unauthorized" or 401 errors** - your token may have expired. Run `claude` again to refresh it.
-- **No data after install** - wait for the first poll interval (default 15 minutes), or right-click the widget and reconfigure with a shorter interval for testing.
 - **429 "Too Many Requests" errors** - the Anthropic API rate-limits usage polling. The default 15-minute interval should be safe, but if you set a very short poll interval you may get throttled. Increase the interval in the widget configuration if this happens.
 
 ## Development
