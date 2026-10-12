@@ -66,6 +66,12 @@ PlasmoidItem {
     property int backoffMultiplier: 1
     property int maxBackoffMultiplier: 8
     property bool fetchInFlight: false
+    // When the last window-end refetch started, so a payload that still carries
+    // a past resets_at does not set off another one on every clock tick.
+    property real lastWindowEndFetch: 0
+    // Minimum gap between window-end refetches, in case the API keeps answering
+    // an ended window with a fresh resets_at.
+    property int windowEndGapMs: 300000
 
     // --- Config ---
     readonly property int pollInterval: plasmoid.configuration.pollInterval * 1000
@@ -162,17 +168,40 @@ PlasmoidItem {
         executable.exec(root.usageCommand(false))
     }
 
+    // Returns whether a fetch was started.
     function requestFetch(source) {
-        if (root.fetchInFlight) return
+        if (root.fetchInFlight) return false
 
         var bypass = (source === "startup" || source === "manual")
         if (!bypass) {
             var elapsed = Date.now() - root.lastFetchTime
-            if (elapsed < root.cooldownMs * root.backoffMultiplier) return
+            if (elapsed < root.cooldownMs * root.backoffMultiplier) return false
         }
 
         pollTimer.restart()
         root.fetchUsage()
+        return true
+    }
+
+    // Refetches once a window the last payload knows about has ended, so the
+    // widget does not sit on "expired" until the next poll (15 minutes by
+    // default). Runs off the clock tick rather than a timer set for resets_at,
+    // which would fire late after a suspend.
+    function checkWindowEnds() {
+        var nowMs = root.now.getTime()
+        if (nowMs - root.lastWindowEndFetch < root.windowEndGapMs) return
+        var resets = [root.fiveHourResets, root.sevenDayResets]
+        for (var i = 0; i < root.weeklyModels.length; i++) resets.push(root.weeklyModels[i].resets)
+        for (var j = 0; j < resets.length; j++) {
+            if (!resets[j]) continue
+            var end = new Date(resets[j]).getTime()
+            // Written so an unparseable date (NaN fails every comparison) is skipped
+            if (!(end <= nowMs && end > root.lastWindowEndFetch)) continue
+            // Marked only once a fetch starts: one held back by the cooldown or
+            // an in-flight fetch is tried again on the next tick.
+            if (root.requestFetch("window_end")) root.lastWindowEndFetch = nowMs
+            return
+        }
     }
 
     function parseUsageData(stdout) {
@@ -184,6 +213,9 @@ PlasmoidItem {
             if (data.error) {
                 root.hasError = true
                 root.errorMessage = data.message || data.error
+                // A window-end refetch right after a resume often beats the
+                // network back; let the next tick try again.
+                if (data.error === "network_error") root.lastWindowEndFetch = 0
                 return
             }
             root.hasError = false
@@ -621,7 +653,10 @@ PlasmoidItem {
         interval: 30000
         running: true
         repeat: true
-        onTriggered: root.now = new Date()
+        onTriggered: {
+            root.now = new Date()
+            root.checkWindowEnds()
+        }
     }
 
     // --- Polling timer ---
@@ -631,7 +666,13 @@ PlasmoidItem {
         running: true
         repeat: true
         onTriggered: root.requestFetch("poll")
-        Component.onCompleted: root.requestFetch("startup")
+        Component.onCompleted: {
+            // The startup fetch is fresh already. Counting it as a window-end
+            // refetch keeps an old cached payload (served when it is rate
+            // limited) from setting off another request a tick later.
+            root.lastWindowEndFetch = Date.now()
+            root.requestFetch("startup")
+        }
     }
 
     // --- Widget setup ---
