@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- Keep the cached usage per Claude folder, so two widget instances pointed at different accounts no longer show each other's data when the API rate-limits one of them
-- Add an optional "Account label" (for example MAX or PRO) shown as small text next to the compact bars, in the tooltip and in the popup title, so several instances monitoring different accounts can be told apart
+- Keep the cached usage per Claude folder, so two widget instances pointed at different accounts no longer show each other's data when the API rate-limits one of them (#5, thanks @victoralcazardev)
+- Add an optional "Account label" (for example MAX or PRO) shown as small text next to the compact bars, in the tooltip and in the popup title, so several instances monitoring different accounts can be told apart (#6, thanks @victoralcazardev)
 - Refresh shortly after a usage window ends, instead of showing "expired" until the next poll
-- Let Claude Code refresh an expired token by running it for a second (`claude --init-only --safe-mode --strict-mcp-config`), so the widget keeps working while you only use Claude on the web. The popup offers a "Refresh token" button, and the new "Expired token: Let Claude Code refresh it automatically" setting (off by default) does it on its own, at most every 30 minutes per account and less often while it keeps failing (#7)
+- Let Claude Code refresh an expired token by running it for a second (`claude --init-only --safe-mode --strict-mcp-config`), so the widget keeps working while you only use Claude on the web. The popup offers a "Refresh token" button, and the new "Expired token: Let Claude Code refresh it automatically" setting (off by default) does it on its own, at most every 30 minutes per account and less often while it keeps failing (#7, building on the idea in #4 by @victoralcazardev)
 - Quote the Claude folder setting safely when running the fetch script, so unusual folder names can no longer break or inject into the command
 
 ## 0.7.0 - 2026-09-23
