@@ -23,7 +23,7 @@ MouseArea {
         id: tooltip
         text: {
             var prefix = compactRep.accountLabel ? compactRep.accountLabel + " - " : ""
-            if (root.renewInFlight) return prefix + "Renewing sign-in…"
+            if (root.renewInFlight) return prefix + "Claude Code is refreshing its token…"
             if (root.hasError) return prefix + root.errorMessage
             var parts = [
                 "5h: " + Math.round(root.fiveHourUtil) + "%",

@@ -554,7 +554,7 @@ PlasmoidItem {
         // Read before the renewal finished; the follow-up is on its way.
         if (queued) return
         if (followUp) {
-            root.renewMessage = "The sign-in still reads as expired. Run claude in a terminal to renew it."
+            root.renewMessage = "The token still reads as expired. Run claude in a terminal to refresh it."
             return
         }
         root.maybeAutoRenew()
@@ -570,7 +570,7 @@ PlasmoidItem {
     // it right away instead of at the next poll.
     onRenewSignInChanged: root.maybeAutoRenew()
 
-    // `now` is a click on "Renew now", which skips the script's 30-minute
+    // `now` is a click on "Refresh token", which skips the script's 30-minute
     // cool-down but not its one-at-a-time lock.
     function startRenew(now) {
         if (root.renewInFlight) return
@@ -636,27 +636,27 @@ PlasmoidItem {
             ? " Next automatic try at " + at(renew.next_try) + "." : ""
         switch (renew.result) {
         case "not_renewed":
-            return "Claude Code started but did not renew the sign-in. Run claude in a terminal to sign in again." + next
+            return "Claude Code started but did not refresh the token. Run claude in a terminal to sign in again." + next
         case "timeout":
-            return "Claude Code did not finish within 30 seconds and was stopped. Run claude in a terminal to renew the sign-in." + next
+            return "Claude Code did not finish within 30 seconds and was stopped. Run claude in a terminal to refresh the token." + next
         case "not_installed":
             if (renew.reason === "not_started")
                 return "Claude Code could not be started. Check that it is installed and works, or run claude in a terminal."
             return "Claude Code was not found on PATH or in ~/.local/bin. Check that it is installed, or run claude in a terminal."
         case "cooldown":
             var last = typeof renew.last_try === "number" ? " at " + at(renew.last_try) : " recently"
-            return "A renewal was already tried" + last + "." + next + " Run claude in a terminal, or use Renew now."
+            return "A refresh was already tried" + last + "." + next + " Run claude in a terminal, or use Refresh token."
         case "busy":
             var who = renew.reason === "claude_refreshing"
-                ? "Claude Code is renewing this sign-in right now"
-                : "Another renewal for this account is running"
+                ? "Claude Code is refreshing this token right now"
+                : "Another refresh for this account is running"
             return who + (recheck ? ", checking again shortly." : ". Try again in a minute.")
         case "not_possible":
-            return "This sign-in cannot be renewed automatically. Run claude in a terminal to sign in again."
+            return "This token cannot be refreshed automatically. Run claude in a terminal to sign in again."
         case "workdir_not_empty":
             return "Claude Code was not started: its folder ~/.cache/claudemeter/claude-renew must be empty, and something is in it. Check and empty it, or run claude in a terminal."
         default:
-            return "Couldn't renew the sign-in. Run claude in a terminal to renew it."
+            return "Couldn't refresh the token. Run claude in a terminal to refresh it."
         }
     }
 

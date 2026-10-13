@@ -220,18 +220,18 @@ KCM.SimpleKCM {
             onTextChanged: cfg_claudeFolder = text
         }
 
-        QQC2.CheckBox {
-            id: renewCheck
-            Kirigami.FormData.label: "Sign-in:"
-            text: "Renew sign-in automatically"
-        }
+        RowLayout {
+            Kirigami.FormData.label: "Expired token:"
+            spacing: Kirigami.Units.smallSpacing
 
-        QQC2.Label {
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 18
-            text: "Starts Claude Code hidden for a moment so it renews its own sign-in. No prompt is sent to Claude and no usage is spent. At most every 30 minutes per account, less often while it keeps failing."
-            font: Kirigami.Theme.smallFont
-            color: Kirigami.Theme.disabledTextColor
-            wrapMode: Text.Wrap
+            QQC2.CheckBox {
+                id: renewCheck
+                text: "Let Claude Code refresh it automatically"
+            }
+
+            Kirigami.ContextualHelpButton {
+                toolTipText: "The widget reads Claude Code's token, which expires after about 8 hours if you don't use Claude Code. When that happens, the widget runs claude --init-only for a second and Claude Code refreshes its own token, as it does whenever you start it. No prompt is sent and no usage is spent. At most every 30 minutes."
+            }
         }
     }
 }

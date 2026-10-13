@@ -74,7 +74,7 @@ Item {
                 Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
             }
             QQC2.Label {
-                text: "Renewing sign-in…"
+                text: "Claude Code is refreshing its token…"
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
             }
@@ -91,7 +91,7 @@ Item {
         QQC2.Label {
             Layout.fillWidth: true
             visible: !root.renewInFlight && root.renewMessage === "" && !root.renewSignIn
-            text: "Turn on \"Renew sign-in automatically\" in the widget settings to have this done for you."
+            text: "Turn on \"Expired token\" in the widget settings to have this happen automatically."
             font: Kirigami.Theme.smallFont
             color: Kirigami.Theme.disabledTextColor
             wrapMode: Text.Wrap
@@ -104,10 +104,10 @@ Item {
 
             Item { Layout.fillWidth: true }
             QQC2.Button {
-                text: "Renew now"
+                text: "Refresh token"
                 icon.name: "view-refresh"
                 onClicked: root.startRenew(true)
-                QQC2.ToolTip.text: "Start Claude Code hidden for a moment so it renews its own sign-in"
+                QQC2.ToolTip.text: "Runs claude --init-only so Claude Code refreshes its own token"
                 QQC2.ToolTip.visible: hovered
             }
         }
