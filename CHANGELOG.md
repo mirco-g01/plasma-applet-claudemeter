@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-10-13
 
 - Keep the cached usage per Claude folder, so two widget instances pointed at different accounts no longer show each other's data when the API rate-limits one of them (#5, thanks @victoralcazardev)
 - Add an optional "Account label" (for example MAX or PRO) shown as small text next to the compact bars, in the tooltip and in the popup title, so several instances monitoring different accounts can be told apart (#6, thanks @victoralcazardev)
