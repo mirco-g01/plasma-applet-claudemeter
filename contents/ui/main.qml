@@ -45,6 +45,23 @@ PlasmoidItem {
     property string claimMessage: ""
     property bool claimSucceeded: false
 
+    // --- Sign-in renewal ---
+    // From the last fetch: the token has expired, and whether Claude Code
+    // could renew it (the script's `renew.possible`).
+    property bool tokenExpired: false
+    property bool renewPossible: false
+    property bool renewInFlight: false
+    // Why the last renewal did not help and what to do instead, or "".
+    property string renewMessage: ""
+    // When the script next allows an automatic try (ms), so a poll during its
+    // cool-down does not start one only to hear "cooldown".
+    property real renewNextTry: 0
+    // A busy result gets one follow-up fetch, not one per poll.
+    property bool renewBusyRechecked: false
+    // The fetch that follows a renewal, which must never start another one.
+    property bool followUpFetch: false
+    property bool followUpQueued: false
+
     // --- Cache state ---
     property bool dataCached: false
 
@@ -79,6 +96,7 @@ PlasmoidItem {
     readonly property int warningThreshold: plasmoid.configuration.warningThreshold
     readonly property int criticalThreshold: plasmoid.configuration.criticalThreshold
     readonly property string claudeFolder: plasmoid.configuration.claudeFolder
+    readonly property bool renewSignIn: plasmoid.configuration.renewSignIn
 
     // --- Compact gauge computed properties ---
     readonly property string compactMetric: plasmoid.configuration.compactMetric
@@ -150,14 +168,21 @@ PlasmoidItem {
         return root.scriptCommand(activity ? ["--activity"] : [])
     }
 
-    // `args` must be shell-safe as is: the claim ids are regex-checked first.
+    // The DataSource runs this through `sh -c`, so every part is single-quoted:
+    // a `$(...)`, backtick or quote in the Claude folder setting stays text.
+    // The `--` keeps a folder such as "--renew" from being read as a mode.
+    function shellQuote(text) {
+        return "'" + String(text).replace(/'/g, "'\\''") + "'"
+    }
+
     function scriptCommand(args) {
         var scriptPath = decodeURIComponent(Qt.resolvedUrl("../scripts/fetch_usage.sh").toString().replace(/^file:\/\//, ""))
-        var cmd = "bash \"" + scriptPath + "\""
-        for (var i = 0; i < args.length; i++) cmd += " \"" + args[i] + "\""
+        var parts = ["bash", root.shellQuote(scriptPath)]
+        for (var i = 0; i < args.length; i++) parts.push(root.shellQuote(args[i]))
+        parts.push("--")
         var folder = root.claudeFolder.trim()
-        if (folder) cmd += " \"" + folder + "\""
-        return cmd
+        if (folder) parts.push(root.shellQuote(folder))
+        return parts.join(" ")
     }
 
     function fetchUsage() {
@@ -208,8 +233,16 @@ PlasmoidItem {
         fetchTimeoutTimer.stop()
         root.fetchInFlight = false
         root.loading = false
+        var followUp = root.followUpFetch
+        root.followUpFetch = false
+        var queued = root.followUpQueued
+        root.followUpQueued = false
+        // Once this source is disconnected: starting the same command now
+        // would reuse it, and the disconnect after this handler would kill it.
+        if (queued) Qt.callLater(root.fetchFollowUp)
         try {
             var data = JSON.parse(stdout)
+            root.updateRenewState(data, followUp, queued)
             if (data.error) {
                 root.hasError = true
                 root.errorMessage = data.message || data.error
@@ -501,6 +534,132 @@ PlasmoidItem {
         }
     }
 
+    // Keeps the renewal state in step with each fetch result, and starts an
+    // automatic renewal when the token has expired and that is allowed. A
+    // follow-up fetch never starts one, so a renewal can never loop.
+    function updateRenewState(data, followUp, queued) {
+        if (!data || data.error !== "token_expired") {
+            root.tokenExpired = false
+            root.renewPossible = false
+            root.renewMessage = ""
+            root.renewBusyRechecked = false
+            return
+        }
+        root.tokenExpired = true
+        root.renewPossible = !!(data.renew && data.renew.possible)
+        if (!root.renewPossible) {
+            root.renewMessage = ""
+            return
+        }
+        // Read before the renewal finished; the follow-up is on its way.
+        if (queued) return
+        if (followUp) {
+            root.renewMessage = "The sign-in still reads as expired. Run claude in a terminal to renew it."
+            return
+        }
+        root.maybeAutoRenew()
+    }
+
+    function maybeAutoRenew() {
+        if (!root.renewSignIn || !root.tokenExpired || !root.renewPossible || root.renewInFlight) return
+        if (Date.now() < root.renewNextTry) return
+        root.startRenew(false)
+    }
+
+    // Turning the setting on while the popup shows an expired sign-in acts on
+    // it right away instead of at the next poll.
+    onRenewSignInChanged: root.maybeAutoRenew()
+
+    // `now` is a click on "Renew now", which skips the script's 30-minute
+    // cool-down but not its one-at-a-time lock.
+    function startRenew(now) {
+        if (root.renewInFlight) return
+        root.renewInFlight = true
+        root.renewMessage = ""
+        renewRunner.command = root.scriptCommand(now ? ["--renew", "--now"] : ["--renew"])
+        renewTimeoutTimer.restart()
+        renewRunner.connectSource(renewRunner.command)
+    }
+
+    function handleRenewResult(stdout) {
+        var data
+        try {
+            data = JSON.parse(stdout)
+        } catch (e) {
+            data = {}
+        }
+        // The script stopped before renewing (for example a refused folder setting).
+        if (data.error) {
+            root.finishRenew({ result: "error" })
+            root.renewMessage = data.message || data.error
+            return
+        }
+        root.finishRenew(data.renew || { result: "error" })
+    }
+
+    function finishRenew(renew) {
+        renewTimeoutTimer.stop()
+        root.renewInFlight = false
+        if (typeof renew.next_try === "number") root.renewNextTry = renew.next_try * 1000
+        if (renew.result !== "busy") root.renewBusyRechecked = false
+        // Renewed here, or by a Claude Code in the meantime: read usage once.
+        if (renew.result === "renewed" || (renew.result === "not_possible" && renew.reason === "not_expired")) {
+            root.renewMessage = ""
+            root.fetchFollowUp()
+            return
+        }
+        var recheck = false
+        if (renew.result === "busy" && !root.renewBusyRechecked) {
+            root.renewBusyRechecked = true
+            renewRecheckTimer.restart()
+            recheck = true
+        }
+        root.renewMessage = root.renewMessageFor(renew, recheck)
+    }
+
+    // Reads usage once after a renewal. A fetch already running may have read
+    // the old token, so this one is queued behind it rather than dropped.
+    function fetchFollowUp() {
+        if (root.requestFetch("manual")) root.followUpFetch = true
+        else root.followUpQueued = true
+    }
+
+    function renewMessageFor(renew, recheck) {
+        // With the weekday once it is not today: backoff can push it a day out.
+        function at(seconds) {
+            var d = new Date(seconds * 1000)
+            var sameDay = d.toDateString() === new Date().toDateString()
+            return Qt.formatDateTime(d, sameDay ? "hh:mm" : "ddd hh:mm")
+        }
+        // Automatic tries only happen with the setting on.
+        var next = root.renewSignIn && typeof renew.next_try === "number"
+            ? " Next automatic try at " + at(renew.next_try) + "." : ""
+        switch (renew.result) {
+        case "not_renewed":
+            return "Claude Code started but did not renew the sign-in. Run claude in a terminal to sign in again." + next
+        case "timeout":
+            return "Claude Code did not finish within 30 seconds and was stopped. Run claude in a terminal to renew the sign-in." + next
+        case "not_installed":
+            if (renew.reason === "not_started")
+                return "Claude Code could not be started. Check that it is installed and works, or run claude in a terminal."
+            return "Claude Code was not found on PATH or in ~/.local/bin. Check that it is installed, or run claude in a terminal."
+        case "cooldown":
+            var last = typeof renew.last_try === "number" ? " at " + at(renew.last_try) : " recently"
+            return "A renewal was already tried" + last + "." + next + " Run claude in a terminal, or use Renew now."
+        case "busy":
+            var who = renew.reason === "claude_refreshing"
+                ? "Claude Code is renewing this sign-in right now"
+                : "Another renewal for this account is running"
+            return who + (recheck ? ", checking again shortly." : ". Try again in a minute.")
+        case "not_possible":
+            return "This sign-in cannot be renewed automatically. Run claude in a terminal to sign in again."
+        case "workdir_not_empty":
+            return "Claude Code was not started: its folder ~/.cache/claudemeter/claude-renew must be empty, and something is in it. Check and empty it, or run claude in a terminal."
+        default:
+            return "Couldn't renew the sign-in. Run claude in a terminal to renew it."
+        }
+    }
+
     // First entry in the API's `limits` array of the given kind, or null.
     function findLimit(limits, kind) {
         for (var i = 0; i < limits.length; i++) {
@@ -592,10 +751,52 @@ PlasmoidItem {
         onTriggered: {
             executable.disconnectSource(root.usageCommand(false))
             root.fetchInFlight = false
+            root.followUpFetch = false
             root.loading = false
             root.hasError = true
             root.errorMessage = "Request timed out"
+            // A renewal ended while this fetch hung; read usage once now.
+            if (root.followUpQueued) {
+                root.followUpQueued = false
+                Qt.callLater(root.fetchFollowUp)
+            }
         }
+    }
+
+    // --- Sign-in renewal ---
+    Plasma5Support.DataSource {
+        id: renewRunner
+        property string command: ""
+        engine: "executable"
+        connectedSources: []
+        onNewData: (sourceName, data) => {
+            disconnectSource(sourceName)
+            root.handleRenewResult(data["stdout"])
+        }
+    }
+
+    // The script's worst case is about 55s: 30s, up to 15s more while Claude
+    // Code is mid-refresh, 5s between TERM and KILL, then cleanup. This only
+    // fires if the script itself hangs; disconnecting kills it, and the
+    // coreutils timeout it runs Claude Code under still stops Claude Code.
+    Timer {
+        id: renewTimeoutTimer
+        interval: 75000
+        running: false
+        repeat: false
+        onTriggered: {
+            renewRunner.disconnectSource(renewRunner.command)
+            root.finishRenew({ result: "error" })
+        }
+    }
+
+    // One more look after a busy result, by when the other renewal is done.
+    Timer {
+        id: renewRecheckTimer
+        interval: 15000
+        running: false
+        repeat: false
+        onTriggered: root.fetchFollowUp()
     }
 
     // --- Limit reset claim ---

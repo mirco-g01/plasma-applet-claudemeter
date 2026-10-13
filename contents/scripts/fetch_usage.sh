@@ -2,20 +2,35 @@
 # Fetch Claude Code usage data from the Anthropic API
 # Outputs JSON to stdout. Always exits 0; errors reported as JSON.
 #
-# Usage: fetch_usage.sh [--activity] [claude-folder]
-#        fetch_usage.sh --claim <grant-id> <request-id> [claude-folder]
+# Usage: fetch_usage.sh [--activity] [-- claude-folder]
+#        fetch_usage.sh --claim <grant-id> <request-id> [-- claude-folder]
+#        fetch_usage.sh --renew [--now] [-- claude-folder]
+#   --          everything after it is the folder, even if it starts with a
+#               dash. The widget always passes it. Without it, a folder that
+#               starts with a dash is refused rather than read as a mode.
 #   --activity  print the mtime of history.jsonl in the resolved folder (or 0)
 #               instead of fetching, so activity polling follows the same
 #               folder resolution the fetch does.
 #   --claim     spend one usage-limit reset from the given grant. Prints
 #               {"claim": {"result": ...}}. Only ever run on an explicit click;
 #               CLAUDEMETER_DRY_RUN=1 prints the request instead of sending it.
+#   --renew     start Claude Code hidden for a moment so it renews an expired
+#               sign-in in the resolved folder (see renew_signin.py). Prints
+#               {"renew": {"result": ...}}. At most once per 30 minutes per
+#               folder, less often after tries that did not work; --now (an
+#               explicit click) skips that wait.
+#
+# A token_expired error from a fetch carries "renew": {"possible", "reason"}.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RENEW_HELPER="$SCRIPT_DIR/renew_signin.py"
 
 MODE="fetch"
 GRANT_ID=""
 REQUEST_ID=""
+RENEW_NOW=""
 if [ "${1:-}" = "--activity" ]; then
     MODE="activity"
     shift
@@ -24,8 +39,20 @@ elif [ "${1:-}" = "--claim" ]; then
     GRANT_ID="${2:-}"
     REQUEST_ID="${3:-}"
     shift 3 || shift $#
+elif [ "${1:-}" = "--renew" ]; then
+    MODE="renew"
+    shift
+    if [ "${1:-}" = "--now" ]; then
+        RENEW_NOW="1"
+        shift
+    fi
 fi
 
+DASHDASH=""
+if [ "${1:-}" = "--" ]; then
+    DASHDASH="1"
+    shift
+fi
 EXPLICIT="${1:-}"
 API="https://api.anthropic.com"
 
@@ -46,6 +73,12 @@ error_json() {
     python3 -c "import json,sys; print(json.dumps({'error':sys.argv[1],'message':sys.argv[2]}))" "$1" "$2"
     exit 0
 }
+
+# A mode flag in the wrong place, or a folder setting such as "--renew", must
+# never switch modes or turn into a folder.
+if [ -z "$DASHDASH" ] && [ "${EXPLICIT#-}" != "$EXPLICIT" ]; then
+    error_json "bad_folder" "Refusing the Claude folder \"$EXPLICIT\": it starts with a dash. Put -- before it."
+fi
 
 # Abbreviate $HOME to ~ for display. Done with bash substitution rather than sed
 # so paths containing regex or delimiter metacharacters cannot corrupt it.
@@ -103,13 +136,31 @@ if [ -z "$CRED_FILE" ] && [ -z "$EXPLICIT" ]; then
 fi
 
 # Cache per Claude folder so several widget instances never show each other's data
-CACHE_FILE="$HOME/.cache/claudemeter/last_usage_$(printf %s "$CLAUDE_DIR" | cksum | cut -d' ' -f1).json"
+FOLDER_KEY="$(printf %s "$CLAUDE_DIR" | cksum | cut -d' ' -f1)"
+CACHE_FILE="$HOME/.cache/claudemeter/last_usage_$FOLDER_KEY.json"
 export CACHE_FILE
 
 # Activity mode needs only the folder, not a token.
 if [ "$MODE" = "activity" ]; then
     stat --format=%Y "$CLAUDE_DIR/history.jsonl" 2>/dev/null || echo 0
     exit 0
+fi
+
+# Renew mode never uses the token: the helper looks only at its expiry and
+# whether a refresh token exists. CLAUDE_CODE_OAUTH_TOKEN is what the fetch
+# below falls back to in the same case, and renewing the file cannot help then.
+# The lock and cool-down are per real folder, however the setting spells it.
+if [ "$MODE" = "renew" ]; then
+    REAL_DIR="$(realpath -m -- "$CLAUDE_DIR" 2>/dev/null)" || REAL_DIR="$CLAUDE_DIR"
+    RENEW_KEY="$(printf %s "$REAL_DIR" | cksum | cut -d' ' -f1)"
+    RENEW_ARGS=(renew "--folder=$CLAUDE_DIR" "--key=$RENEW_KEY" "--credentials=$CRED_FILE")
+    if [ -z "$EXPLICIT" ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+        RENEW_ARGS+=(--env-token)
+    fi
+    if [ -n "$RENEW_NOW" ]; then
+        RENEW_ARGS+=(--now)
+    fi
+    exec python3 -I "$RENEW_HELPER" "${RENEW_ARGS[@]}"
 fi
 
 # Extract token and check expiry via python3, reading creds from file (not args)
@@ -167,7 +218,16 @@ if [ -z "$TOKEN" ]; then
 fi
 
 if [ "$EXPIRED" = "1" ]; then
-    error_json "token_expired" "OAuth token has expired. Run claude to refresh."
+    # Whether Claude Code could renew it, so the widget can offer that. Only
+    # reached for a token from the file: an env token never counts as expired.
+    TOKEN=""
+    RENEW_INFO="$(python3 -I "$RENEW_HELPER" check "--credentials=$CRED_FILE" 2>/dev/null)" \
+        || RENEW_INFO='{"possible": false, "reason": "unreadable"}'
+    python3 -c "
+import json, sys
+print(json.dumps({'error': 'token_expired', 'message': sys.argv[1], 'renew': json.loads(sys.argv[2])}))
+" "OAuth token has expired. Run claude to refresh." "$RENEW_INFO"
+    exit 0
 fi
 
 TMPFILE=$(mktemp)

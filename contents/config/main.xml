@@ -62,5 +62,9 @@
             <label>Path to Claude config folder (optional)</label>
             <default></default>
         </entry>
+        <entry name="renewSignIn" type="Bool">
+            <label>Start Claude Code hidden for a moment to renew an expired sign-in</label>
+            <default>false</default>
+        </entry>
     </group>
 </kcfg>

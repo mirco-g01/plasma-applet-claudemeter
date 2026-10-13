@@ -5,6 +5,8 @@
 - Keep the cached usage per Claude folder, so two widget instances pointed at different accounts no longer show each other's data when the API rate-limits one of them
 - Add an optional "Account label" (for example MAX or PRO) shown as small text next to the compact bars, in the tooltip and in the popup title, so several instances monitoring different accounts can be told apart
 - Refresh shortly after a usage window ends, instead of showing "expired" until the next poll
+- Renew an expired sign-in by starting Claude Code hidden for a moment (`claude --init-only --safe-mode --strict-mcp-config`), so the widget keeps working while you only use Claude on the web. The popup offers a "Renew now" button, and the new "Renew sign-in automatically" setting (off by default) does it on its own, at most every 30 minutes per account and less often while it keeps failing (#7)
+- Quote the Claude folder setting safely when running the fetch script, so unusual folder names can no longer break or inject into the command
 
 ## 0.7.0 - 2026-09-23
 

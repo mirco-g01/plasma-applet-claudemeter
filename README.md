@@ -12,6 +12,7 @@ A KDE Plasma 6 panel applet that monitors your Claude Code rate limits.
 - Adds a separate bar for every scoped weekly limit the API reports (e.g. Fable), discovered dynamically so new models and plan tiers work without an update
 - Popup bars show your pace: each bar is split into its hours or days, a marker tracks the current time, and usage that has run past that marker is drawn in the warning color
 - Shows the usage-limit reset claude.ai offers under Settings > Usage (what it refills, how many are left, the deadline) and lets you spend it from the popup, always behind a confirmation step. The widget never uses a reset on its own
+- Can renew an expired sign-in by starting Claude Code hidden for a moment, so the widget keeps working while you only use Claude on the web. A button in the popup, or automatic when you turn it on (see [Automatic sign-in renewal](#automatic-sign-in-renewal-optional))
 - Two compact panel styles: stacked bars or circular gauge
 - Configurable warning/critical thresholds with color coding
 - Customizable bar colors
@@ -25,6 +26,7 @@ A KDE Plasma 6 panel applet that monitors your Claude Code rate limits.
 3. Parses the response for the 5-hour and 7-day windows, plus every scoped weekly limit in the `limits` array that has a reset time or non-zero utilization (the older top-level `seven_day_*` fields are still read as a fallback)
 4. The token is passed to `curl` via stdin (not as a command-line argument, which would be visible in `/proc`)
 5. Using a reset sends `POST /api/organizations/<org>/reset_rate_limits`, the same request Claude Code's `/limit-reset` makes. The organization id comes from Claude Code's `.claude.json`
+6. An expired token is only ever renewed by Claude Code itself, which the widget can start for a moment. The widget never calls the OAuth token endpoint
 
 > **Note:** This widget uses an internal Anthropic API endpoint that is not part of the public API documentation. It may change or stop working without notice.
 
@@ -70,6 +72,57 @@ Right-click the widget and select "Configure...". Options include:
 - **Colors** - customize the normal and warning bar colors
 - **Claude folder** - path to an alternate Claude config folder (default: `~/.claude`). Useful if you run multiple accounts via `CLAUDE_CONFIG_DIR`, e.g. `~/.claude-personal`. Add one widget instance per account to monitor them side by side
 - **Account label** - a short text such as MAX or PRO, shown in the panel next to the bars or gauge (not in vertical panels), in the tooltip and in the popup title, so instances for different accounts can be told apart (default: empty)
+- **Renew sign-in automatically** - when the sign-in token has expired, start Claude Code hidden for a moment so it renews it, at most every 30 minutes per account. See [Automatic sign-in renewal](#automatic-sign-in-renewal-optional) (default: off)
+
+## Automatic sign-in renewal (optional)
+
+The widget borrows Claude Code's sign-in token, which lasts about 8 hours, and only Claude Code renews it. If you use Claude only on the web or in the desktop app for a while, the widget stops at "OAuth token has expired" until you run `claude` again. Renewal lets the widget have Claude Code do that for you.
+
+It is off by default. Whenever the token has expired and can be renewed, the popup offers a **Renew now** button. Turn on **Renew sign-in automatically** in the widget settings to have the widget do the same on its own.
+
+### When it runs
+
+- Only when a fetch finds the token expired and the credentials file has a refresh token (and, if the file says when that refresh token expires, the time has not passed yet). A token from `CLAUDE_CODE_OAUTH_TOKEN` is never involved.
+- Automatically at most once every 30 minutes per Claude folder, counted from the last try and shared by all widget instances, however the folder setting is spelled. After an automatic try that did not renew the sign-in, the wait doubles (1 hour, 2 hours, 4 hours and so on, up to a day) until one works. The popup shows when the next try is due.
+- **Renew now** skips that wait. A click that does not work keeps the current wait length, counted from the click, and one that works resets it to 30 minutes.
+- Never twice at once for the same folder, and not while a running Claude Code is renewing the same sign-in itself (its `.oauth_refresh.lock` is less than a minute old).
+- When it worked, the widget reads your usage again straight away, once. When it did not, the popup says why and what to do next.
+
+### What it runs
+
+From an empty folder of its own, `~/.cache/claudemeter/claude-renew` (mode 700):
+
+```sh
+CLAUDE_CONFIG_DIR=<your Claude folder> \
+DISABLE_AUTOUPDATER=1 \
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+CLAUDE_CODE_SKIP_PROMPT_HISTORY=1 \
+timeout -k 5 60 claude --init-only --safe-mode --strict-mcp-config </dev/null >/dev/null 2>&1
+```
+
+- `--init-only` runs Claude Code's startup, which includes renewing the sign-in, and exits. `--safe-mode` turns off CLAUDE.md, skills, plugins, hooks and MCP servers, and `--strict-mcp-config` ignores every MCP config file.
+- The folder must be empty. If anything is in it, Claude Code is not started and the popup says so: without a terminal, Claude Code does not ask whether to trust a folder, so settings planted there (such as `.claude/settings.json`) would apply.
+- `claude` is looked up on `PATH`, then in `~/.local/bin`.
+- `CLAUDE_CONFIG_DIR`: if your session already sets it to this same folder, it is passed on as it is. Otherwise, for `~/.claude` it is left unset, because setting it, even to the default folder, makes Claude Code look for its settings in `~/.claude/.claude.json` instead of `~/.claude.json`. For any other folder it is set to that folder.
+- The rest of your session environment is passed on, so proxy settings keep working, except variables that would make Claude Code use another credential or provider, skip its refresh lock, or act as if it ran inside another session: `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`, `CLAUDE_CODE_OAUTH_REFRESH_TOKEN`, `CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR`, `CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR`, `CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_AWS_API_KEY`, `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_FOUNDRY_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `CLAUDE_CODE_USE_GATEWAY`, `CLAUDE_CODE_USE_MANTLE`, `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH`, `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH`, `CLAUDE_CODE_DISABLE_AUTH_REFRESH_LOCK`, `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_CODE_CHILD_SESSION`.
+- It takes about a second. After 30 seconds it is stopped, along with anything it started (TERM, then KILL 5 seconds later). If Claude Code is in the middle of renewing at that point (its `.oauth_refresh.lock` is fresh), it gets up to 15 seconds more, since stopping it halfway could sign you out.
+- `timeout -k 5 60` is a safety net for when the widget itself goes away mid-run: Plasma then kills the widget's script outright, and `timeout` still stops Claude Code. Normally the script stops it well before that.
+- Its output is discarded, never shown or logged.
+
+Tested with Claude Code 2.1.296.
+
+### What it does not do
+
+- No prompt and no model request, so no usage is spent
+- No MCP servers, hooks or plugins. Your user settings still apply as on any Claude Code start, including ones that run commands, such as `apiKeyHelper` or `awsAuthRefresh`
+- In testing it left no session transcript, no `history.jsonl` entry (so the widget's activity check does not fire either) and no project entry for its folder, and it cleaned up its session file. The new sign-in lands in the credentials file, written by Claude Code itself, and Claude Code may update its own bookkeeping, as on any start
+- The widget never uses, prints or passes on the tokens. It looks only at the expiry times and whether a refresh token exists, and it never calls the OAuth endpoint: refresh tokens rotate, and writing new ones back could race a running Claude Code and sign you out
+
+Apart from that, the widget keeps a lock file and a small state file (time of the last try, tries in a row that did not work) for each Claude folder in `~/.cache/claudemeter/` (`renew_<id>.lock`, `renew_<id>.json`).
+
+### Turning it off
+
+Untick **Renew sign-in automatically** in the widget settings (it stays off unless you turned it on). The widget then never starts Claude Code by itself: only a click on **Renew now** does.
 
 ## Troubleshooting
 
@@ -79,7 +132,12 @@ Right-click the widget and select "Configure...". Options include:
   - You authenticate with `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper`, Bedrock, Vertex, or Foundry instead of `claude /login`. No credentials file is written in those setups, and the widget cannot work from those credentials: `/api/oauth/usage` is subscription-scoped and needs an OAuth bearer token carrying the `user:profile` scope, which a Console API key does not have. A `claude setup-token` credential does not help either, since [it can only make model requests](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token). Sign in with `claude` to get a token the widget can use.
   - You signed out and have not signed back in.
 - **"Several accounts found ..."** - two or more `~/.claude*` folders each hold credentials, and the widget will not guess between them. Set **Claude folder** to the one you want. Add a second widget instance pointed at the other folder to watch both.
-- **"Unauthorized" or 401 errors** - your token may have expired. Run `claude` again to refresh it.
+- **"OAuth token has expired"** - Claude Code renews its token, which lasts about 8 hours, only while it runs. Run `claude` once, click **Renew now** in the popup, or turn on [automatic sign-in renewal](#automatic-sign-in-renewal-optional). When renewal fails, the popup says why:
+  - "was not found" - `claude` is neither on plasmashell's `PATH` nor in `~/.local/bin`. Check that Claude Code is installed.
+  - "did not renew the sign-in" - usually the sign-in itself has lapsed. Run `claude` in a terminal and sign in again if it asks.
+  - "cannot be renewed automatically", or no **Renew now** button - the credentials file has no refresh token, or that has expired too. Run `claude` in a terminal to sign in again.
+  - "must be empty" - something is in `~/.cache/claudemeter/claude-renew`. Check what it is, then empty the folder.
+- **"API returned HTTP 401"** - the server rejected a token the credentials file still calls valid, for example after you signed out elsewhere. Run `claude` in a terminal and sign in again if it asks. Renewal does not help here: it only steps in once the file says the token has expired.
 - **429 "Too Many Requests" errors** - the Anthropic API rate-limits usage polling. The default 15-minute interval should be safe, but if you set a very short poll interval you may get throttled. Increase the interval in the widget configuration if this happens.
 
 ## Development
@@ -89,6 +147,7 @@ Tasks are driven by [just](https://github.com/casey/just):
 ```sh
 just              # list the recipes
 just check        # validate metadata, config schema, shell scripts and QML, then build
+just test-renew   # test sign-in renewal against a stub claude in a throwaway HOME
 just reinstall    # install into the running session and restart plasmashell
 just run          # open the widget standalone
 ```

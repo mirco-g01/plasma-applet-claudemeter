@@ -30,8 +30,14 @@ lint:
     python3 -c 'import xml.etree.ElementTree as e; e.parse("contents/config/main.xml")' || failed=1
 
     echo "==> shell scripts"
-    for script in install.sh contents/scripts/fetch_usage.sh; do
+    for script in install.sh contents/scripts/fetch_usage.sh tests/test_renew.sh; do
         bash -n "$script" || failed=1
+    done
+
+    echo "==> python"
+    # ast.parse rather than py_compile, so no __pycache__ lands in contents/.
+    for script in contents/scripts/renew_signin.py; do
+        python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' "$script" || failed=1
     done
 
     echo "==> qml"
@@ -76,6 +82,10 @@ package:
     {{rel}} package "$version" "$asset" >/dev/null
     cp -f "$asset" "{{dist}}/{{widget_id}}.plasmoid"
     ls -lh "$asset" "{{dist}}/{{widget_id}}.plasmoid"
+
+# Test sign-in renewal against a stub claude in a throwaway HOME (about 45s).
+test-renew:
+    bash tests/test_renew.sh
 
 # Lint and build without touching git. Safe to run any time.
 check: lint package

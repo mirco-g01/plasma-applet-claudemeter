@@ -23,6 +23,7 @@ MouseArea {
         id: tooltip
         text: {
             var prefix = compactRep.accountLabel ? compactRep.accountLabel + " - " : ""
+            if (root.renewInFlight) return prefix + "Renewing sign-in…"
             if (root.hasError) return prefix + root.errorMessage
             var parts = [
                 "5h: " + Math.round(root.fiveHourUtil) + "%",
@@ -67,7 +68,8 @@ MouseArea {
         width: Kirigami.Units.iconSizes.small
         height: width
         source: "data-warning"
-        visible: root.hasError
+        // Not while a renewal runs: that is expected, not something to fix.
+        visible: root.hasError && !root.renewInFlight
         color: Kirigami.Theme.negativeTextColor
     }
 }

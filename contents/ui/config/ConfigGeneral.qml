@@ -29,6 +29,7 @@ KCM.SimpleKCM {
     property alias cfg_currencySymbol: currencyField.text
     property string cfg_claudeFolder
     property string cfg_accountLabel
+    property alias cfg_renewSignIn: renewCheck.checked
 
     // Defaults injected by Plasma config system
     property var cfg_pollIntervalDefault
@@ -44,6 +45,7 @@ KCM.SimpleKCM {
     property var cfg_warningColorDefault
     property var cfg_currencySymbolDefault
     property var cfg_claudeFolderDefault
+    property var cfg_renewSignInDefault
 
     readonly property var styleModel: [
         { value: "bars", label: "Bars" },
@@ -216,6 +218,20 @@ KCM.SimpleKCM {
             implicitWidth: Kirigami.Units.gridUnit * 18
             text: cfg_claudeFolder
             onTextChanged: cfg_claudeFolder = text
+        }
+
+        QQC2.CheckBox {
+            id: renewCheck
+            Kirigami.FormData.label: "Sign-in:"
+            text: "Renew sign-in automatically"
+        }
+
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 18
+            text: "Starts Claude Code hidden for a moment so it renews its own sign-in. No prompt is sent to Claude and no usage is spent. At most every 30 minutes per account, less often while it keeps failing."
+            font: Kirigami.Theme.smallFont
+            color: Kirigami.Theme.disabledTextColor
+            wrapMode: Text.Wrap
         }
     }
 }

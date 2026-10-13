@@ -44,15 +44,73 @@ Item {
         }
     }
 
-    // Error display
+    // Error display. Held back while a renewal runs, which may well fix it.
     QQC2.Label {
         Layout.fillWidth: true
         Layout.leftMargin: Kirigami.Units.smallSpacing
         Layout.rightMargin: Kirigami.Units.smallSpacing
-        visible: root.hasError
+        visible: root.hasError && !root.renewInFlight
         text: root.errorMessage
         color: Kirigami.Theme.negativeTextColor
         wrapMode: Text.Wrap
+    }
+
+    // Sign-in renewal: progress, why it did not help, and a way to retry.
+    ColumnLayout {
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.smallSpacing
+        Layout.rightMargin: Kirigami.Units.smallSpacing
+        visible: root.tokenExpired && (root.renewPossible || root.renewInFlight)
+        spacing: Kirigami.Units.smallSpacing
+
+        RowLayout {
+            Layout.fillWidth: true
+            visible: root.renewInFlight
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.BusyIndicator {
+                running: root.renewInFlight
+                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+            }
+            QQC2.Label {
+                text: "Renewing sign-in…"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+            }
+        }
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            visible: !root.renewInFlight && root.renewMessage !== ""
+            text: root.renewMessage
+            font: Kirigami.Theme.smallFont
+            wrapMode: Text.Wrap
+        }
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            visible: !root.renewInFlight && root.renewMessage === "" && !root.renewSignIn
+            text: "Turn on \"Renew sign-in automatically\" in the widget settings to have this done for you."
+            font: Kirigami.Theme.smallFont
+            color: Kirigami.Theme.disabledTextColor
+            wrapMode: Text.Wrap
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            visible: !root.renewInFlight && root.renewPossible
+            spacing: Kirigami.Units.smallSpacing
+
+            Item { Layout.fillWidth: true }
+            QQC2.Button {
+                text: "Renew now"
+                icon.name: "view-refresh"
+                onClicked: root.startRenew(true)
+                QQC2.ToolTip.text: "Start Claude Code hidden for a moment so it renews its own sign-in"
+                QQC2.ToolTip.visible: hovered
+            }
+        }
     }
 
     // Loading indicator
