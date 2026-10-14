@@ -1,8 +1,10 @@
-<img src="docs/logo.png" alt="Claude Meter logo" width="96" align="right">
-
 # Claude Meter
 
-[![Available on the KDE Store](https://img.shields.io/badge/KDE%20Store-Get%20It-blue?logo=kde)](https://store.kde.org/p/2348058/)
+[![KDE Store](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fapi.kde-look.org%2Focs%2Fv1%2Fcontent%2Fdata%2F2348058&query=%2F%2Fversion&prefix=Get%20v&label=KDE%20Store&logo=kde&color=1d99f3)](https://store.kde.org/p/2348058/)
+[![Plasma 6](https://img.shields.io/badge/Plasma-6-1d99f3?logo=kde)](https://kde.org/plasma-desktop/)
+[![Release](https://img.shields.io/github/v/release/p3kj/plasma-applet-claudemeter)](https://github.com/p3kj/plasma-applet-claudemeter/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/p3kj/plasma-applet-claudemeter)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/p3kj/plasma-applet-claudemeter)](https://github.com/p3kj/plasma-applet-claudemeter/commits/master)
 
 A KDE Plasma 6 panel applet that monitors your Claude Code rate limits.
 
