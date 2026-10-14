@@ -42,7 +42,7 @@ A KDE Plasma 6 panel applet that monitors your Claude Code rate limits.
 ## Requirements
 
 - KDE Plasma 6
-- Claude Code CLI with an active subscription (Pro or Max)
+- Claude Code CLI signed in with a Claude plan (Pro, Max or Team)
 - `python3`
 - `curl`
 
