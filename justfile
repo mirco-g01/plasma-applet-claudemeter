@@ -83,7 +83,7 @@ package:
     cp -f "$asset" "{{dist}}/{{widget_id}}.plasmoid"
     ls -lh "$asset" "{{dist}}/{{widget_id}}.plasmoid"
 
-# Test sign-in renewal against a stub claude in a throwaway HOME (about 45s).
+# Test sign-in renewal against a stub claude in a throwaway HOME (about 90s).
 test-renew:
     bash tests/test_renew.sh
 
