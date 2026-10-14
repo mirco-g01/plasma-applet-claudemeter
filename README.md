@@ -1,23 +1,30 @@
+<img src="docs/logo.png" alt="Claude Meter logo" width="96" align="right">
+
 # Claude Meter
 
 [![Available on the KDE Store](https://img.shields.io/badge/KDE%20Store-Get%20It-blue?logo=kde)](https://store.kde.org/p/2348058/)
 
 A KDE Plasma 6 panel applet that monitors your Claude Code rate limits.
 
-![screenshot.png](screenshot.png)
+![Claude Meter in a Plasma panel, with its popup open](docs/screenshots/hero-dark.png)
 
 ## Features
+
+<img src="docs/screenshots/popup-dark.png" alt="The popup: usage bars with pace markers, a limit reset and extra usage" width="320" align="right">
 
 - Displays the 5-hour and 7-day (all models) rate limit windows
 - Adds a separate bar for every scoped weekly limit the API reports (e.g. Fable), discovered dynamically so new models and plan tiers work without an update
 - Popup bars show your pace: each bar is split into its hours or days, a marker tracks the current time, and usage that has run past that marker is drawn in the warning color
 - Shows the usage-limit reset claude.ai offers under Settings > Usage (what it refills, how many are left, the deadline) and lets you spend it from the popup, always behind a confirmation step. The widget never uses a reset on its own
 - Can let Claude Code refresh its expired token by running it for a second, so the widget keeps working while you only use Claude on the web. A button in the popup, or automatic when you turn it on (see [Automatic token refresh](#automatic-token-refresh-optional))
-- Two compact panel styles: stacked bars or circular gauge
+- Two compact panel styles: stacked bars or circular gauge, with an optional inner ring for a second limit
+- Monitors several accounts side by side, one widget per Claude folder, each with its own short label
 - Configurable warning/critical thresholds with color coding
 - Customizable bar colors
 - Auto-refreshes on a configurable polling interval
 - Warning icon when credentials are missing or the API returns an error
+
+![Panel styles: bars, gauge, inner ring, account labels, custom colors and the warning colors](docs/screenshots/styles-dark.png)
 
 ## How It Works
 

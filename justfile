@@ -107,6 +107,10 @@ reinstall: install
         echo "Restart plasmashell yourself, or the panel keeps the old QML." >&2
     fi
 
+# Re-render docs/screenshots from the real QML with demo data (flashes a window per shot).
+screenshots *args:
+    @python3 tools/screenshots/render.py "$@"
+
 # Remove the widget from the local Plasma session.
 uninstall:
     kpackagetool6 -t Plasma/Applet -r {{widget_id}}

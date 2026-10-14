@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- New icon: the widget in a panel with its popup open, the same picture as the KDE Store logo
+
 ## 0.8.0 - 2026-10-13
 
 - Keep the cached usage per Claude folder, so two widget instances pointed at different accounts no longer show each other's data when the API rate-limits one of them (#5, thanks @victoralcazardev)
