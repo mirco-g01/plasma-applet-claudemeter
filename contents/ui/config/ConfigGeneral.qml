@@ -26,6 +26,7 @@ KCM.SimpleKCM {
     property string cfg_warningColor
     property alias cfg_currencySymbol: currencyField.text
     property string cfg_claudeFolder
+    property string cfg_accountLabel
 
     // Defaults injected by Plasma config system
     property var cfg_pollIntervalDefault
@@ -39,6 +40,7 @@ KCM.SimpleKCM {
     property var cfg_warningColorDefault
     property var cfg_currencySymbolDefault
     property var cfg_claudeFolderDefault
+    property var cfg_accountLabelDefault
 
     readonly property var styleModel: [
         { value: "bars", label: "Bars" },
@@ -179,6 +181,15 @@ KCM.SimpleKCM {
             implicitWidth: Kirigami.Units.gridUnit * 18
             text: cfg_claudeFolder
             onTextChanged: cfg_claudeFolder = text
+        }
+
+        QQC2.TextField {
+            id: accountLabelField
+            Kirigami.FormData.label: "Account name:"
+            placeholderText: "auto (from .claude.json)"
+            implicitWidth: Kirigami.Units.gridUnit * 18
+            text: cfg_accountLabel
+            onTextChanged: cfg_accountLabel = text
         }
     }
 }

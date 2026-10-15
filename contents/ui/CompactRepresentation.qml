@@ -18,17 +18,18 @@ MouseArea {
     QQC2.ToolTip {
         id: tooltip
         text: {
-            if (root.hasError) return root.errorMessage
-            var parts = [
-                "5h: " + Math.round(root.fiveHourUtil) + "%",
-                "7d: " + Math.round(root.sevenDayUtil) + "%"
-            ]
+            var prefix = root.accountTitle ? root.accountTitle + " — " : ""
+            if (root.hasError && !root.hasData) return prefix + root.errorMessage
+            var parts = ["5h: " + Math.round(root.fiveHourUtil) + "%"]
+            if (root.hasSevenDay) parts.push("7d: " + Math.round(root.sevenDayUtil) + "%")
             for (var i = 0; i < root.weeklyModels.length; i++) {
                 var m = root.weeklyModels[i]
                 var name = m.label.replace(/^Weekly \(|\)$/g, "")
                 parts.push(name + ": " + Math.round(m.util) + "%")
             }
-            return parts.join(" | ")
+            var suffix = root.dataStale
+                ? " (ultimo stato " + Qt.formatDateTime(root.lastUpdated, "dd/MM hh:mm") + ")" : ""
+            return prefix + parts.join(" | ") + suffix
         }
         visible: compactRep.containsMouse
     }
@@ -47,7 +48,7 @@ MouseArea {
         width: Kirigami.Units.iconSizes.small
         height: width
         source: "data-warning"
-        visible: root.hasError
+        visible: root.hasError && !root.hasData
         color: Kirigami.Theme.negativeTextColor
     }
 }

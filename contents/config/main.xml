@@ -44,7 +44,11 @@
         </entry>
         <entry name="warningColor" type="String">
             <label>Warning usage bar color</label>
-            <default>#E5C07B</default>
+            <default>#E06C75</default>
+        </entry>
+        <entry name="accountLabel" type="String">
+            <label>Account name shown in the popup (optional, auto-detected if empty)</label>
+            <default></default>
         </entry>
         <entry name="claudeFolder" type="String">
             <label>Path to Claude config folder (optional)</label>

@@ -28,10 +28,30 @@ Item {
         Layout.leftMargin: Kirigami.Units.smallSpacing
         Layout.rightMargin: Kirigami.Units.smallSpacing
         Layout.topMargin: Kirigami.Units.smallSpacing
-        Kirigami.Heading {
-            text: "Claude Code Usage"
-            level: 4
+        ColumnLayout {
             Layout.fillWidth: true
+            spacing: 0
+            Kirigami.Heading {
+                text: "Claude Code Usage"
+                level: 4
+                Layout.fillWidth: true
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                visible: text !== ""
+                text: root.accountTitle
+                font.bold: true
+                color: root.usageColor(0)
+                elide: Text.ElideRight
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                visible: text !== ""
+                text: root.accountEmail
+                font: Kirigami.Theme.smallFont
+                color: Kirigami.Theme.disabledTextColor
+                elide: Text.ElideRight
+            }
         }
         QQC2.ToolButton {
             icon.name: "view-refresh"
@@ -80,6 +100,7 @@ Item {
 
         UsageBar {
             Layout.fillWidth: true
+            visible: root.hasSevenDay
             label: "Weekly (All Models)"
             percentage: root.sevenDayUtil
             barColor: root.usageColor(root.sevenDayUtil)
@@ -159,7 +180,10 @@ Item {
         Layout.fillWidth: true
         Layout.rightMargin: Kirigami.Units.smallSpacing
         Layout.bottomMargin: Kirigami.Units.smallSpacing
-        text: (root.dataCached ? "Cached " : "Updated ") + Qt.formatTime(root.lastUpdated, "hh:mm:ss")
+        text: root.dataStale
+            ? "Ultimo stato " + Qt.formatDateTime(root.lastUpdated, "dd/MM hh:mm") + " — " + root.staleReason
+            : (root.dataCached ? "Cached " : "Updated ") + Qt.formatTime(root.lastUpdated, "hh:mm:ss")
+        wrapMode: Text.Wrap
         font: Kirigami.Theme.smallFont
         color: Kirigami.Theme.disabledTextColor
         horizontalAlignment: Text.AlignRight

@@ -10,10 +10,38 @@ CLAUDE_DIR="${1:-$HOME/.claude}"
 CLAUDE_DIR="${CLAUDE_DIR/#\~/$HOME}"
 
 CRED_FILE="$CLAUDE_DIR/.credentials.json"
-CACHE_FILE="$HOME/.cache/claudemeter/last_usage.json"
+# Cache separata per cartella/account (più istanze del widget non si mescolano)
+CACHE_TAG=$(basename "$CLAUDE_DIR")
+CACHE_FILE="$HOME/.cache/claudemeter/last_usage${CACHE_TAG#.claude}.json"
 
+# Account info (email/nome/organizzazione) dal .claude.json di Claude Code.
+# Con la cartella di default il file sta in ~/.claude.json, altrimenti dentro la cartella.
+if [ "$CLAUDE_DIR" = "$HOME/.claude" ] && [ ! -f "$CLAUDE_DIR/.claude.json" ]; then
+    ACCOUNT_FILE="$HOME/.claude.json"
+else
+    ACCOUNT_FILE="$CLAUDE_DIR/.claude.json"
+fi
+export CLAUDEMETER_ACCOUNT=$(python3 -c "
+import json, sys
+try:
+    a = json.load(open(sys.argv[1])).get('oauthAccount') or {}
+    print(json.dumps({k: a.get(k, '') for k in ('emailAddress', 'displayName', 'organizationName', 'organizationType')}))
+except Exception:
+    print('{}')
+" "$ACCOUNT_FILE" 2>/dev/null || echo '{}')
+
+# Errore: se c'è un ultimo stato misurato lo restituisce (marcato stale), altrimenti JSON d'errore.
 error_json() {
-    python3 -c "import json,sys; print(json.dumps({'error':sys.argv[1],'message':sys.argv[2]}))" "$1" "$2"
+    python3 -c "
+import json, os, sys
+account = json.loads(os.environ.get('CLAUDEMETER_ACCOUNT') or '{}')
+try:
+    with open(sys.argv[3]) as f:
+        data = json.load(f)
+    data.update({'_account': account, 'cached': True, 'stale': True, 'stale_reason': sys.argv[2]})
+except Exception:
+    data = {'error': sys.argv[1], 'message': sys.argv[2], '_account': account}
+print(json.dumps(data))" "$1" "$2" "$CACHE_FILE"
     exit 0
 }
 
@@ -57,10 +85,11 @@ TOKEN=""
 if [ "$HTTP_CODE" = "429" ]; then
     if [ -f "$CACHE_FILE" ]; then
         python3 -c "
-import json, sys
+import json, os, sys
 try:
     with open(sys.argv[1]) as f:
         data = json.load(f)
+    data['_account'] = json.loads(os.environ.get('CLAUDEMETER_ACCOUNT') or '{}')
     data['cached'] = True
     data['rate_limited'] = True
     json.dump(data, sys.stdout)
@@ -85,6 +114,7 @@ try:
         json.dump({'error': 'api_error', 'message': str(msg)}, sys.stdout)
     else:
         data['_fetched_at'] = int(time.time())
+        data['_account'] = json.loads(os.environ.get('CLAUDEMETER_ACCOUNT') or '{}')
         cache_dir = os.path.expanduser('~/.cache/claudemeter')
         os.makedirs(cache_dir, exist_ok=True)
         with open(os.path.join(cache_dir, 'last_usage.json'), 'w') as f:

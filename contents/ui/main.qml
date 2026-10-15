@@ -10,13 +10,26 @@ PlasmoidItem {
     id: root
 
     // --- Usage data properties ---
-    property real fiveHourUtil: 0
+    // Valori grezzi dall'API (o dalla cache); quelli esposti azzerano le
+    // finestre il cui reset è già passato, così l'ultimo stato resta corretto.
+    property real fiveHourRaw: 0
     property string fiveHourResets: ""
-    property real sevenDayUtil: 0
+    property real sevenDayRaw: 0
     property string sevenDayResets: ""
+    property bool hasSevenDay: true
+    property var weeklyModelsRaw: []
+    property real nowMs: Date.now()
+    readonly property real fiveHourUtil: windowExpired(fiveHourResets) ? 0 : fiveHourRaw
+    readonly property real sevenDayUtil: windowExpired(sevenDayResets) ? 0 : sevenDayRaw
     // Per-model weekly limits, discovered dynamically from any `seven_day_*`
     // field in the API response. Each entry: { key, label, util, resets }.
-    property var weeklyModels: []
+    readonly property var weeklyModels: weeklyModelsRaw.map(function (w) {
+        return { key: w.key, label: w.label, resets: w.resets,
+                 util: root.windowExpired(w.resets) ? 0 : w.util }
+    })
+    property bool hasData: false
+    property bool dataStale: false
+    property string staleReason: ""
     property bool hasError: false
     property string errorMessage: ""
     property bool loading: true
@@ -28,6 +41,18 @@ PlasmoidItem {
     property real extraUsageUtil: 0
     property string extraUsageLimit: ""
     property string extraUsageUsed: ""
+
+    // --- Account (da oauthAccount del .claude.json) ---
+    property string accountEmail: ""
+    property string accountDisplayName: ""
+    property string accountOrg: ""
+    property string accountOrgType: ""
+    readonly property string accountTitle: {
+        var custom = (plasmoid.configuration.accountLabel || "").trim()
+        if (custom) return custom
+        if (accountOrg) return accountOrg + (accountOrgType === "claude_team" ? " (Team)" : "")
+        return accountDisplayName
+    }
 
     // --- Cache state ---
     property bool dataCached: false
@@ -113,6 +138,12 @@ PlasmoidItem {
         root.loading = false
         try {
             var data = JSON.parse(stdout)
+            if (data._account) {
+                root.accountEmail = data._account.emailAddress || ""
+                root.accountDisplayName = data._account.displayName || ""
+                root.accountOrg = data._account.organizationName || ""
+                root.accountOrgType = data._account.organizationType || ""
+            }
             if (data.error) {
                 root.hasError = true
                 root.errorMessage = data.message || data.error
@@ -121,12 +152,16 @@ PlasmoidItem {
             root.hasError = false
             root.errorMessage = ""
 
+            root.hasData = true
+            root.dataStale = !!data.stale
+            root.staleReason = data.stale_reason || ""
             if (data.five_hour) {
-                root.fiveHourUtil = data.five_hour.utilization || 0
+                root.fiveHourRaw = data.five_hour.utilization || 0
                 root.fiveHourResets = data.five_hour.resets_at || ""
             }
+            root.hasSevenDay = !!data.seven_day
             if (data.seven_day) {
-                root.sevenDayUtil = data.seven_day.utilization || 0
+                root.sevenDayRaw = data.seven_day.utilization || 0
                 root.sevenDayResets = data.seven_day.resets_at || ""
             }
 
@@ -149,7 +184,7 @@ PlasmoidItem {
                 if (b.util !== a.util) return b.util - a.util
                 return a.key < b.key ? -1 : a.key > b.key ? 1 : 0
             })
-            root.weeklyModels = weeklies
+            root.weeklyModelsRaw = weeklies
 
             if (data.extra_usage) {
                 root.hasExtraUsage = true
@@ -188,6 +223,10 @@ PlasmoidItem {
             parts[i] = parts[i].charAt(0).toUpperCase() + parts[i].slice(1)
         }
         return "Weekly (" + parts.join(" ") + ")"
+    }
+
+    function windowExpired(isoString) {
+        return !!isoString && new Date(isoString).getTime() <= root.nowMs
     }
 
     function usageColor(percent) {
@@ -242,6 +281,14 @@ PlasmoidItem {
             // GNU stat format — Linux-only, which is fine since this is a KDE Plasma widget
             connectSource("stat --format=%Y \"" + dir + "/history.jsonl\" 2>/dev/null || echo 0")
         }
+    }
+
+    // --- Clock for expiring stale windows ---
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        onTriggered: root.nowMs = Date.now()
     }
 
     // --- Activity check timer ---
